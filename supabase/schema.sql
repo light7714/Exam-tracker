@@ -42,3 +42,21 @@ create table if not exists revision_units (
 );
 
 create index if not exists revision_units_chapter_idx on revision_units (chapter_id, sort_order, created_at);
+
+create table if not exists revision_chapter_notes (
+  chapter_id uuid primary key references revision_chapters(id) on delete cascade,
+  notes_html text not null default '',
+  weak_points jsonb not null default '[]'::jsonb,
+  formulas jsonb not null default '[]'::jsonb,
+  mistakes jsonb not null default '[]'::jsonb,
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
+create table if not exists revision_unit_notes (
+  unit_id uuid primary key references revision_units(id) on delete cascade,
+  notes_html text not null default '',
+  weak_points jsonb not null default '[]'::jsonb,
+  formulas jsonb not null default '[]'::jsonb,
+  mistakes jsonb not null default '[]'::jsonb,
+  updated_at timestamptz not null default timezone('utc', now())
+);

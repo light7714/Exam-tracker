@@ -1,7 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { FormEvent, useMemo, useState } from "react";
 
+import { ConfirmDeleteModal } from "@/components/confirm-delete-modal";
 import { RevisionBoard as RevisionBoardType, RevisionChapter, RevisionStatus, RevisionUnit, STATUS_OPTIONS, Subject } from "@/lib/types";
 
 type RevisionBoardProps = {
@@ -16,6 +18,12 @@ type RevisionUnitCreateResponse = {
 };
 
 type RevisionUnitUpdateResponse = {
+  chapterId?: string;
+  chapterStatus?: RevisionStatus;
+  error?: string;
+};
+
+type RevisionUnitDeleteResponse = {
   chapterId?: string;
   chapterStatus?: RevisionStatus;
   error?: string;
@@ -45,6 +53,11 @@ export function RevisionBoard({ initialBoard }: RevisionBoardProps) {
   const [unitDrafts, setUnitDrafts] = useState<Record<string, string>>({});
   const [expandedUnitForms, setExpandedUnitForms] = useState<Record<string, boolean>>({});
   const [error, setError] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<
+    | { entityType: "chapter" | "unit"; id: string; title: string; subject: Subject }
+    | null
+  >(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const progress = useMemo(() => {
     const chapters = Object.values(board).flat();
@@ -247,17 +260,75 @@ export function RevisionBoard({ initialBoard }: RevisionBoardProps) {
     }
   }
 
+  async function deleteEntity() {
+    if (!deleteTarget) {
+      return;
+    }
+
+    setIsDeleting(true);
+    setError("");
+
+    try {
+      if (deleteTarget.entityType === "chapter") {
+        const response = await fetch(`/api/revision/chapters?id=${deleteTarget.id}`, { method: "DELETE" });
+        const data = (await response.json()) as { error?: string };
+
+        if (!response.ok) {
+          throw new Error(data.error || "Unable to delete chapter.");
+        }
+
+        setBoard((current) => ({
+          ...current,
+          [deleteTarget.subject]: current[deleteTarget.subject].filter((chapter) => chapter.id !== deleteTarget.id)
+        }));
+      } else {
+        const response = await fetch(`/api/revision/units?id=${deleteTarget.id}`, { method: "DELETE" });
+        const data = (await response.json()) as RevisionUnitDeleteResponse;
+
+        if (!response.ok) {
+          throw new Error(data.error || "Unable to delete unit.");
+        }
+
+        setBoard((current) => {
+          const next = { ...current };
+
+          for (const subject of subjectMeta) {
+            next[subject.key] = next[subject.key].map((chapter) => ({
+              ...chapter,
+              status: chapter.id === data.chapterId && data.chapterStatus ? data.chapterStatus : chapter.status,
+              units: chapter.units.filter((unit) => unit.id !== deleteTarget.id)
+            }));
+          }
+
+          return next;
+        });
+      }
+
+      setDeleteTarget(null);
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : `Unable to delete ${deleteTarget.entityType}.`);
+    } finally {
+      setIsDeleting(false);
+    }
+  }
+
   return (
-    <section className="revision-shell">
+    <>
+      <section className="revision-shell">
       <div className="panel-heading">
         <div>
           <p className="eyebrow">Revision Board</p>
           <h2>Track chapters and units</h2>
         </div>
 
-        <div className="progress-card">
-          <span>{progress.done} done</span>
-          <strong>{progress.total ? Math.round((progress.done / progress.total) * 100) : 0}% complete</strong>
+        <div className="revision-top-actions">
+          <a href="#subject-zoology" className="jump-link">
+            Go to Biology sections
+          </a>
+          <div className="progress-card">
+            <span>{progress.done} done</span>
+            <strong>{progress.total ? Math.round((progress.done / progress.total) * 100) : 0}% complete</strong>
+          </div>
         </div>
       </div>
 
@@ -265,7 +336,7 @@ export function RevisionBoard({ initialBoard }: RevisionBoardProps) {
 
       <div className="revision-grid">
         {subjectMeta.map((subject) => (
-          <section key={subject.key} className="subject-card">
+          <section key={subject.key} className="subject-card" id={`subject-${subject.key}`}>
             <div className="subject-card__header">
               <div>
                 <h3>{subject.label}</h3>
@@ -302,32 +373,60 @@ export function RevisionBoard({ initialBoard }: RevisionBoardProps) {
                 board[subject.key].map((chapter) => (
                   <article key={chapter.id} className="chapter-card">
                     <div className="chapter-card__row">
-                      <input
-                        type="text"
-                        value={chapter.title}
-                        onChange={(event) => {
-                          const title = event.target.value;
-                          setBoard((current) => ({
-                            ...current,
-                            [subject.key]: current[subject.key].map((item) =>
-                              item.id === chapter.id ? { ...item, title } : item
-                            )
-                          }));
-                        }}
-                        onBlur={(event) => updateChapter(chapter.id, { title: event.target.value })}
-                        className="editable-input"
-                      />
-                      <select
-                        value={chapter.status}
-                        onChange={(event) => updateChapter(chapter.id, { status: event.target.value as RevisionStatus })}
-                        className={statusClassName(chapter.status)}
-                      >
-                        {STATUS_OPTIONS.map((status) => (
-                          <option key={status} value={status}>
-                            {statusLabels[status]}
-                          </option>
-                        ))}
-                      </select>
+                      <div className="entity-main-row">
+                        <input
+                          type="text"
+                          value={chapter.title}
+                          onChange={(event) => {
+                            const title = event.target.value;
+                            setBoard((current) => ({
+                              ...current,
+                              [subject.key]: current[subject.key].map((item) =>
+                                item.id === chapter.id ? { ...item, title } : item
+                              )
+                            }));
+                          }}
+                          onBlur={(event) => updateChapter(chapter.id, { title: event.target.value })}
+                          className="editable-input"
+                        />
+                        <Link
+                          href={`/revision/${subject.key}/chapter/${chapter.id}` as never}
+                          className="link-icon-button"
+                          aria-label={`Open notes for ${chapter.title || "this chapter"}`}
+                          title="Open notes"
+                        >
+                          ↗
+                        </Link>
+                      </div>
+                      <div className="status-action-row">
+                        <select
+                          value={chapter.status}
+                          onChange={(event) => updateChapter(chapter.id, { status: event.target.value as RevisionStatus })}
+                          className={statusClassName(chapter.status)}
+                        >
+                          {STATUS_OPTIONS.map((status) => (
+                            <option key={status} value={status}>
+                              {statusLabels[status]}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          className="delete-icon-button"
+                          aria-label={`Delete ${chapter.title || "this chapter"}`}
+                          title="Delete"
+                          onClick={() =>
+                            setDeleteTarget({
+                              entityType: "chapter",
+                              id: chapter.id,
+                              title: chapter.title || "this chapter",
+                              subject: subject.key
+                            })
+                          }
+                        >
+                          ×
+                        </button>
+                      </div>
                     </div>
 
                     <div className="unit-controls">
@@ -362,40 +461,70 @@ export function RevisionBoard({ initialBoard }: RevisionBoardProps) {
                     {chapter.units.length ? (
                       <div className="unit-list">
                         {chapter.units.map((unit) => (
-                          <div key={unit.id} className="unit-row">
-                            <input
-                              type="text"
-                              value={unit.title}
-                              onChange={(event) => {
-                                const title = event.target.value;
-                                setBoard((current) => ({
-                                  ...current,
-                                  [subject.key]: current[subject.key].map((item) =>
-                                    item.id === chapter.id
-                                      ? {
-                                          ...item,
-                                          units: item.units.map((currentUnit) =>
-                                            currentUnit.id === unit.id ? { ...currentUnit, title } : currentUnit
-                                          )
-                                        }
-                                      : item
-                                  )
-                                }));
-                              }}
-                              onBlur={(event) => updateUnit(unit.id, { title: event.target.value })}
-                              className="editable-input editable-input--unit"
-                            />
-                            <select
-                              value={unit.status}
-                              onChange={(event) => updateUnit(unit.id, { status: event.target.value as RevisionStatus })}
-                              className={statusClassName(unit.status)}
-                            >
-                              {STATUS_OPTIONS.map((status) => (
-                                <option key={status} value={status}>
-                                  {statusLabels[status]}
-                                </option>
-                              ))}
-                            </select>
+                          <div key={unit.id} className="unit-item">
+                            <div className="unit-row">
+                              <div className="entity-main-row entity-main-row--unit">
+                                <input
+                                  type="text"
+                                  value={unit.title}
+                                  onChange={(event) => {
+                                    const title = event.target.value;
+                                    setBoard((current) => ({
+                                      ...current,
+                                      [subject.key]: current[subject.key].map((item) =>
+                                        item.id === chapter.id
+                                          ? {
+                                              ...item,
+                                              units: item.units.map((currentUnit) =>
+                                                currentUnit.id === unit.id ? { ...currentUnit, title } : currentUnit
+                                              )
+                                            }
+                                          : item
+                                      )
+                                    }));
+                                  }}
+                                  onBlur={(event) => updateUnit(unit.id, { title: event.target.value })}
+                                  className="editable-input editable-input--unit"
+                                />
+                                <Link
+                                  href={`/revision/${subject.key}/unit/${unit.id}` as never}
+                                  className="link-icon-button link-icon-button--unit"
+                                  aria-label={`Open notes for ${unit.title || "this unit"}`}
+                                  title="Open notes"
+                                >
+                                  ↗
+                                </Link>
+                              </div>
+                              <div className="status-action-row status-action-row--unit">
+                                <select
+                                  value={unit.status}
+                                  onChange={(event) => updateUnit(unit.id, { status: event.target.value as RevisionStatus })}
+                                  className={statusClassName(unit.status)}
+                                >
+                                  {STATUS_OPTIONS.map((status) => (
+                                    <option key={status} value={status}>
+                                      {statusLabels[status]}
+                                    </option>
+                                  ))}
+                                </select>
+                                <button
+                                  type="button"
+                                  className="delete-icon-button delete-icon-button--unit"
+                                  aria-label={`Delete ${unit.title || "this unit"}`}
+                                  title="Delete"
+                                  onClick={() =>
+                                    setDeleteTarget({
+                                      entityType: "unit",
+                                      id: unit.id,
+                                      title: unit.title || "this unit",
+                                      subject: subject.key
+                                    })
+                                  }
+                                >
+                                  ×
+                                </button>
+                              </div>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -411,6 +540,26 @@ export function RevisionBoard({ initialBoard }: RevisionBoardProps) {
           </section>
         ))}
       </div>
-    </section>
+      </section>
+
+      {deleteTarget ? (
+        <ConfirmDeleteModal
+          title={`Delete ${deleteTarget.title}?`}
+          description={
+            deleteTarget.entityType === "chapter"
+              ? "Are you sure you want to delete this chapter and all its units, notes, and checklist items? This cannot be undone."
+              : "Are you sure you want to delete this unit and all its contents? This cannot be undone."
+          }
+          confirmLabel={`Delete ${deleteTarget.entityType}`}
+          isDeleting={isDeleting}
+          onCancel={() => {
+            if (!isDeleting) {
+              setDeleteTarget(null);
+            }
+          }}
+          onConfirm={deleteEntity}
+        />
+      ) : null}
+    </>
   );
 }

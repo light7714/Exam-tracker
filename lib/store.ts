@@ -10,8 +10,13 @@ import {
   MockTestPayload,
   RevisionBoard,
   RevisionChapter,
+  RevisionChecklist,
+  RevisionChecklistItem,
+  RevisionDetailEntry,
+  RevisionDetailType,
   RevisionStatus,
   RevisionUnit,
+  REVISION_CHECKLIST_GROUPS,
   SUBJECTS,
   Subject
 } from "@/lib/types";
@@ -29,7 +34,18 @@ type LocalStore = {
   mockTests: MockTest[];
   revisionChapters: Array<Omit<RevisionChapter, "units">>;
   revisionUnits: RevisionUnit[];
+  revisionChapterNotes: LocalRevisionNote[];
+  revisionUnitNotes: LocalRevisionNote[];
 };
+
+type LocalRevisionNote = {
+  id: string;
+  notesHtml: string;
+  checklist: RevisionChecklist;
+  updatedAt: string;
+};
+
+type PartialRevisionChecklist = Partial<Record<keyof RevisionChecklist, Partial<RevisionChecklistItem>[]>>;
 
 const localStorePath = path.join(process.cwd(), "data", "local-store.json");
 
@@ -38,14 +54,78 @@ function emptyStore(): LocalStore {
     dailyEntries: [],
     mockTests: [],
     revisionChapters: [],
-    revisionUnits: []
+    revisionUnits: [],
+    revisionChapterNotes: [],
+    revisionUnitNotes: []
+  };
+}
+
+function emptyRevisionChecklist(): RevisionChecklist {
+  return {
+    weakPoints: [],
+    formulas: [],
+    mistakes: []
+  };
+}
+
+function normalizeChecklistItem(item: Partial<RevisionChecklistItem>) {
+  return {
+    id: item.id || randomUUID(),
+    text: (item.text || "").trim(),
+    checked: Boolean(item.checked)
+  } satisfies RevisionChecklistItem;
+}
+
+function normalizeChecklist(checklist?: PartialRevisionChecklist): RevisionChecklist {
+  return Object.fromEntries(
+    REVISION_CHECKLIST_GROUPS.map((group) => [
+      group,
+      ((checklist?.[group] || []) as Partial<RevisionChecklistItem>[])
+        .map((item) => normalizeChecklistItem(item))
+        .filter((item) => item.text)
+    ])
+  ) as RevisionChecklist;
+}
+
+function normalizeRichTextHtml(html: string) {
+  const trimmed = html.trim();
+  const textContent = trimmed.replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/\s+/g, " ").trim();
+  return textContent ? trimmed : "";
+}
+
+function checklistSnapshot(checklist: RevisionChecklist) {
+  return JSON.stringify(normalizeChecklist(checklist));
+}
+
+function hasRevisionDetailContent(notesHtml: string, checklist: RevisionChecklist) {
+  return Boolean(normalizeRichTextHtml(notesHtml)) || REVISION_CHECKLIST_GROUPS.some((group) => checklist[group].length > 0);
+}
+
+function normalizeLocalStore(store: Partial<LocalStore>): LocalStore {
+  return {
+    dailyEntries: store.dailyEntries || [],
+    mockTests: store.mockTests || [],
+    revisionChapters: store.revisionChapters || [],
+    revisionUnits: store.revisionUnits || [],
+    revisionChapterNotes: (store.revisionChapterNotes || []).map((note) => ({
+      id: note.id,
+      notesHtml: note.notesHtml || "",
+      checklist: normalizeChecklist(note.checklist),
+      updatedAt: note.updatedAt || new Date().toISOString()
+    })),
+    revisionUnitNotes: (store.revisionUnitNotes || []).map((note) => ({
+      id: note.id,
+      notesHtml: note.notesHtml || "",
+      checklist: normalizeChecklist(note.checklist),
+      updatedAt: note.updatedAt || new Date().toISOString()
+    }))
   };
 }
 
 async function readLocalStore() {
   try {
     const raw = await readFile(localStorePath, "utf8");
-    return JSON.parse(raw) as LocalStore;
+    return normalizeLocalStore(JSON.parse(raw) as Partial<LocalStore>);
   } catch {
     return emptyStore();
   }
@@ -109,6 +189,44 @@ function deriveChapterStatusFromUnits(units: RevisionUnit[]): RevisionStatus {
   }
 
   return "in-progress";
+}
+
+function buildRevisionDetailEntry(
+  entityType: RevisionDetailType,
+  entity: RevisionChapter | RevisionUnit,
+  note: LocalRevisionNote | null,
+  subject: Subject,
+  chapterTitle?: string
+): RevisionDetailEntry {
+  const baseChecklist = note?.checklist || emptyRevisionChecklist();
+
+  if (entityType === "chapter") {
+    const chapter = entity as RevisionChapter;
+    return {
+      entityType,
+      id: chapter.id,
+      subject,
+      title: chapter.title,
+      status: chapter.status,
+      notesHtml: note?.notesHtml || "",
+      checklist: baseChecklist,
+      updatedAt: note?.updatedAt
+    };
+  }
+
+  const unit = entity as RevisionUnit;
+  return {
+    entityType,
+    id: unit.id,
+    subject,
+    title: unit.title,
+    status: unit.status,
+    notesHtml: note?.notesHtml || "",
+    checklist: baseChecklist,
+    updatedAt: note?.updatedAt,
+    chapterId: unit.chapterId,
+    chapterTitle
+  };
 }
 
 function normalizeLabel(label?: string) {
@@ -463,6 +581,270 @@ export async function getRevisionBoard(): Promise<RevisionBoard> {
   return buildBoard(store.revisionChapters, store.revisionUnits);
 }
 
+function getRevisionNoteTable(entityType: RevisionDetailType) {
+  return entityType === "chapter" ? "revision_chapter_notes" : "revision_unit_notes";
+}
+
+function isMissingSupabaseTableError(message: string | undefined, table: string) {
+  if (!message) {
+    return false;
+  }
+
+  return (
+    message.includes(`relation "${table}" does not exist`) ||
+    message.includes(`relation "public.${table}" does not exist`) ||
+    message.includes(`Could not find the table 'public.${table}' in the schema cache`)
+  );
+}
+
+function getRevisionNoteKey(entityType: RevisionDetailType) {
+  return entityType === "chapter" ? "chapter_id" : "unit_id";
+}
+
+function getLocalRevisionNotes(store: LocalStore, entityType: RevisionDetailType) {
+  return entityType === "chapter" ? store.revisionChapterNotes : store.revisionUnitNotes;
+}
+
+export async function getRevisionDetail(entityType: RevisionDetailType, id: string): Promise<RevisionDetailEntry> {
+  if (isSupabaseConfigured()) {
+    const supabase = getSupabaseAdmin()!;
+    const noteTable = getRevisionNoteTable(entityType);
+
+    if (entityType === "chapter") {
+      const { data: chapter, error: chapterError } = await supabase
+        .from("revision_chapters")
+        .select("id, subject, title, status")
+        .eq("id", id)
+        .maybeSingle();
+
+      if (chapterError) {
+        throw new Error(chapterError.message);
+      }
+
+      if (!chapter) {
+        throw new Error("Chapter not found.");
+      }
+
+      const { data: note, error: noteError } = await supabase
+        .from("revision_chapter_notes")
+        .select("notes_html, weak_points, formulas, mistakes, updated_at")
+        .eq("chapter_id", id)
+        .maybeSingle();
+
+      if (noteError && !isMissingSupabaseTableError(noteError.message, noteTable)) {
+        throw new Error(noteError.message);
+      }
+
+      return {
+        entityType,
+        id: chapter.id,
+        subject: chapter.subject as Subject,
+        title: chapter.title,
+        status: chapter.status as RevisionStatus,
+        notesHtml: note?.notes_html || "",
+        checklist: normalizeChecklist({
+          weakPoints: (note?.weak_points as Partial<RevisionChecklistItem>[] | null) || [],
+          formulas: (note?.formulas as Partial<RevisionChecklistItem>[] | null) || [],
+          mistakes: (note?.mistakes as Partial<RevisionChecklistItem>[] | null) || []
+        }),
+        updatedAt: note?.updated_at
+      };
+    }
+
+    const { data: unit, error: unitError } = await supabase
+      .from("revision_units")
+      .select("id, chapter_id, title, status")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (unitError) {
+      throw new Error(unitError.message);
+    }
+
+    if (!unit) {
+      throw new Error("Unit not found.");
+    }
+
+    const { data: chapter, error: chapterError } = await supabase
+      .from("revision_chapters")
+      .select("id, subject, title")
+      .eq("id", unit.chapter_id)
+      .maybeSingle();
+
+    if (chapterError) {
+      throw new Error(chapterError.message);
+    }
+
+    if (!chapter) {
+      throw new Error("Chapter not found.");
+    }
+
+    const { data: note, error: noteError } = await supabase
+      .from("revision_unit_notes")
+      .select("notes_html, weak_points, formulas, mistakes, updated_at")
+      .eq("unit_id", id)
+      .maybeSingle();
+
+    if (noteError && !isMissingSupabaseTableError(noteError.message, noteTable)) {
+      throw new Error(noteError.message);
+    }
+
+    return {
+      entityType,
+      id: unit.id,
+      subject: chapter.subject as Subject,
+      title: unit.title,
+      status: unit.status as RevisionStatus,
+      notesHtml: note?.notes_html || "",
+      checklist: normalizeChecklist({
+        weakPoints: (note?.weak_points as Partial<RevisionChecklistItem>[] | null) || [],
+        formulas: (note?.formulas as Partial<RevisionChecklistItem>[] | null) || [],
+        mistakes: (note?.mistakes as Partial<RevisionChecklistItem>[] | null) || []
+      }),
+      updatedAt: note?.updated_at,
+      chapterId: chapter.id,
+      chapterTitle: chapter.title
+    };
+  }
+
+  const store = await readLocalStore();
+
+  if (entityType === "chapter") {
+    const chapter = store.revisionChapters.find((item) => item.id === id);
+
+    if (!chapter) {
+      throw new Error("Chapter not found.");
+    }
+
+    const note = store.revisionChapterNotes.find((item) => item.id === id) || null;
+
+    return buildRevisionDetailEntry(entityType, { ...chapter, units: [] }, note, chapter.subject);
+  }
+
+  const unit = store.revisionUnits.find((item) => item.id === id);
+
+  if (!unit) {
+    throw new Error("Unit not found.");
+  }
+
+  const chapter = store.revisionChapters.find((item) => item.id === unit.chapterId);
+
+  if (!chapter) {
+    throw new Error("Chapter not found.");
+  }
+
+  const note = store.revisionUnitNotes.find((item) => item.id === id) || null;
+
+  return buildRevisionDetailEntry(entityType, unit, note, chapter.subject, chapter.title);
+}
+
+export async function saveRevisionDetail(
+  entityType: RevisionDetailType,
+  id: string,
+  payload: { notesHtml: string; checklist: RevisionChecklist }
+) {
+  const checklist = normalizeChecklist(payload.checklist);
+  const notesHtml = normalizeRichTextHtml(payload.notesHtml || "");
+  const updatedAt = new Date().toISOString();
+
+  if (isSupabaseConfigured()) {
+    const supabase = getSupabaseAdmin()!;
+    const noteKey = getRevisionNoteKey(entityType);
+    const table = getRevisionNoteTable(entityType);
+    const { data: existingNote, error: existingError } = await supabase
+      .from(table)
+      .select("notes_html, weak_points, formulas, mistakes, updated_at")
+      .eq(noteKey, id)
+      .maybeSingle();
+
+    if (existingError && !isMissingSupabaseTableError(existingError.message, table)) {
+      throw new Error(existingError.message);
+    }
+
+    const existingChecklist = normalizeChecklist({
+      weakPoints: (existingNote?.weak_points as Partial<RevisionChecklistItem>[] | null) || [],
+      formulas: (existingNote?.formulas as Partial<RevisionChecklistItem>[] | null) || [],
+      mistakes: (existingNote?.mistakes as Partial<RevisionChecklistItem>[] | null) || []
+    });
+    const existingNotesHtml = normalizeRichTextHtml(existingNote?.notes_html || "");
+
+    if (!existingNote && !hasRevisionDetailContent(notesHtml, checklist)) {
+      return { updatedAt: undefined };
+    }
+
+    if (
+      existingNote &&
+      existingNotesHtml === notesHtml &&
+      checklistSnapshot(existingChecklist) === checklistSnapshot(checklist)
+    ) {
+      return { updatedAt: existingNote.updated_at };
+    }
+
+    const { data, error } = await supabase
+      .from(table)
+      .upsert(
+        {
+          [noteKey]: id,
+          notes_html: notesHtml,
+          weak_points: checklist.weakPoints,
+          formulas: checklist.formulas,
+          mistakes: checklist.mistakes,
+          updated_at: updatedAt
+        },
+        { onConflict: noteKey }
+      )
+      .select("updated_at")
+      .single();
+
+    if (error) {
+      if (isMissingSupabaseTableError(error.message, table)) {
+        throw new Error("Revision note tables are missing in Supabase. Run the latest supabase/schema.sql and try again.");
+      }
+
+      throw new Error(error.message);
+    }
+
+    return { updatedAt: data.updated_at };
+  }
+
+  const store = await readLocalStore();
+  const entityExists =
+    entityType === "chapter"
+      ? store.revisionChapters.some((item) => item.id === id)
+      : store.revisionUnits.some((item) => item.id === id);
+
+  if (!entityExists) {
+    throw new Error(`${entityType === "chapter" ? "Chapter" : "Unit"} not found.`);
+  }
+
+  const noteCollection = getLocalRevisionNotes(store, entityType);
+  const existing = noteCollection.find((item) => item.id === id);
+
+  if (!existing && !hasRevisionDetailContent(notesHtml, checklist)) {
+    return { updatedAt: undefined };
+  }
+
+  if (existing && normalizeRichTextHtml(existing.notesHtml) === notesHtml && checklistSnapshot(existing.checklist) === checklistSnapshot(checklist)) {
+    return { updatedAt: existing.updatedAt };
+  }
+
+  if (existing) {
+    existing.notesHtml = notesHtml;
+    existing.checklist = checklist;
+    existing.updatedAt = updatedAt;
+  } else {
+    noteCollection.push({
+      id,
+      notesHtml,
+      checklist,
+      updatedAt
+    });
+  }
+
+  await writeLocalStore(store);
+  return { updatedAt };
+}
+
 export async function createRevisionChapter(subject: Subject, title: string) {
   const cleanedTitle = title.trim();
 
@@ -560,6 +942,33 @@ export async function updateRevisionChapter(
     chapter.sortOrder = payload.sortOrder;
   }
 
+  await writeLocalStore(store);
+}
+
+export async function deleteRevisionChapter(id: string) {
+  if (isSupabaseConfigured()) {
+    const supabase = getSupabaseAdmin()!;
+    const { error } = await supabase.from("revision_chapters").delete().eq("id", id);
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    return;
+  }
+
+  const store = await readLocalStore();
+  const chapterExists = store.revisionChapters.some((item) => item.id === id);
+
+  if (!chapterExists) {
+    throw new Error("Chapter not found.");
+  }
+
+  const unitIds = store.revisionUnits.filter((item) => item.chapterId === id).map((item) => item.id);
+  store.revisionChapters = store.revisionChapters.filter((item) => item.id !== id);
+  store.revisionUnits = store.revisionUnits.filter((item) => item.chapterId !== id);
+  store.revisionChapterNotes = store.revisionChapterNotes.filter((item) => item.id !== id);
+  store.revisionUnitNotes = store.revisionUnitNotes.filter((item) => !unitIds.includes(item.id));
   await writeLocalStore(store);
 }
 
@@ -753,4 +1162,75 @@ export async function updateRevisionUnit(id: string, payload: Partial<Pick<Revis
   chapter.status = deriveChapterStatusFromUnits(store.revisionUnits.filter((item) => item.chapterId === unit.chapterId));
   await writeLocalStore(store);
   return { chapterId: unit.chapterId, chapterStatus: chapter.status };
+}
+
+export async function deleteRevisionUnit(id: string) {
+  if (isSupabaseConfigured()) {
+    const supabase = getSupabaseAdmin()!;
+    const { data: existingUnit, error: existingUnitError } = await supabase
+      .from("revision_units")
+      .select("chapter_id")
+      .eq("id", id)
+      .single();
+
+    if (existingUnitError || !existingUnit) {
+      throw new Error(existingUnitError?.message || "Unit not found.");
+    }
+
+    const { error } = await supabase.from("revision_units").delete().eq("id", id);
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    const { data: units, error: unitsError } = await supabase
+      .from("revision_units")
+      .select("id, chapter_id, title, status, sort_order")
+      .eq("chapter_id", existingUnit.chapter_id)
+      .order("sort_order", { ascending: true });
+
+    if (unitsError) {
+      throw new Error(unitsError.message);
+    }
+
+    const chapterStatus = deriveChapterStatusFromUnits(
+      (units || []).map((item) => ({
+        id: item.id,
+        chapterId: item.chapter_id,
+        title: item.title,
+        status: item.status as RevisionStatus,
+        sortOrder: item.sort_order
+      }))
+    );
+
+    const { error: chapterError } = await supabase
+      .from("revision_chapters")
+      .update({ status: chapterStatus })
+      .eq("id", existingUnit.chapter_id);
+
+    if (chapterError) {
+      throw new Error(chapterError.message);
+    }
+
+    return { chapterId: existingUnit.chapter_id, chapterStatus };
+  }
+
+  const store = await readLocalStore();
+  const unit = store.revisionUnits.find((item) => item.id === id);
+
+  if (!unit) {
+    throw new Error("Unit not found.");
+  }
+
+  store.revisionUnits = store.revisionUnits.filter((item) => item.id !== id);
+  store.revisionUnitNotes = store.revisionUnitNotes.filter((item) => item.id !== id);
+
+  const chapter = store.revisionChapters.find((item) => item.id === unit.chapterId);
+
+  if (chapter) {
+    chapter.status = deriveChapterStatusFromUnits(store.revisionUnits.filter((item) => item.chapterId === unit.chapterId));
+  }
+
+  await writeLocalStore(store);
+  return { chapterId: unit.chapterId, chapterStatus: chapter?.status || "not-started" };
 }

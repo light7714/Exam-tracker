@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { hasAccess } from "@/lib/auth";
-import { createRevisionUnit, updateRevisionUnit } from "@/lib/store";
+import { createRevisionUnit, deleteRevisionUnit, updateRevisionUnit } from "@/lib/store";
 import { STATUS_OPTIONS } from "@/lib/types";
 
 export async function POST(request: Request) {
@@ -51,6 +51,29 @@ export async function PATCH(request: Request) {
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to update unit." },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(request: Request) {
+  if (!(await hasAccess())) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get("id");
+
+    if (!id) {
+      return NextResponse.json({ error: "Missing unit id." }, { status: 400 });
+    }
+
+    const result = await deleteRevisionUnit(id);
+    return NextResponse.json(result);
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Unable to delete unit." },
       { status: 500 }
     );
   }

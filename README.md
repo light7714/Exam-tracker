@@ -5,6 +5,7 @@ A private NEET prep tracker built with Next.js for:
 - monthly mock-test logging
 - daily notes
 - revision tracking by subject, chapter, and optional unit
+- chapter and unit note pages with checklist support
 
 ## Tech stack
 
@@ -194,6 +195,10 @@ If you add new tables, columns, or constraints later:
 5. Deploy to Vercel
 
 Try to keep a record of every SQL change so production and local setup stay in sync.
+
+Current reminder:
+
+- the chapter/unit notes feature requires the latest `supabase/schema.sql`, which adds `revision_chapter_notes` and `revision_unit_notes`
 
 ## Useful commands
 
