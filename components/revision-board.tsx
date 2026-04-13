@@ -8,6 +8,19 @@ type RevisionBoardProps = {
   initialBoard: RevisionBoardType;
 };
 
+type RevisionUnitCreateResponse = {
+  unit?: RevisionUnit;
+  chapterId?: string;
+  chapterStatus?: RevisionStatus;
+  error?: string;
+};
+
+type RevisionUnitUpdateResponse = {
+  chapterId?: string;
+  chapterStatus?: RevisionStatus;
+  error?: string;
+};
+
 const subjectMeta: Array<{ key: Subject; label: string }> = [
   { key: "physics", label: "Physics" },
   { key: "chemistry", label: "Chemistry" },
@@ -47,7 +60,9 @@ export function RevisionBoard({ initialBoard }: RevisionBoardProps) {
     return Object.fromEntries(
       subjectMeta.map((subject) => {
         const chapters = board[subject.key];
-        const total = chapters.length + chapters.reduce((count, chapter) => count + chapter.units.length, 0);
+        const chapterTotal = chapters.length;
+        const chapterDone = chapters.filter((chapter) => chapter.status === "done").length;
+        const total = chapterTotal + chapters.reduce((count, chapter) => count + chapter.units.length, 0);
         const done =
           chapters.filter((chapter) => chapter.status === "done").length +
           chapters.reduce((count, chapter) => count + chapter.units.filter((unit) => unit.status === "done").length, 0);
@@ -55,13 +70,13 @@ export function RevisionBoard({ initialBoard }: RevisionBoardProps) {
         return [
           subject.key,
           {
-            total,
-            done,
+            chapterTotal,
+            chapterDone,
             percentage: total ? Math.round((done / total) * 100) : 0
           }
         ];
       })
-    ) as Record<Subject, { total: number; done: number; percentage: number }>;
+    ) as Record<Subject, { chapterTotal: number; chapterDone: number; percentage: number }>;
   }, [board]);
 
   async function createChapter(event: FormEvent<HTMLFormElement>, subject: Subject) {
@@ -157,7 +172,7 @@ export function RevisionBoard({ initialBoard }: RevisionBoardProps) {
         body: JSON.stringify({ chapterId, title })
       });
 
-      const data = (await response.json()) as { unit?: RevisionUnit; error?: string };
+      const data = (await response.json()) as RevisionUnitCreateResponse;
 
       if (!response.ok || !data.unit) {
         throw new Error(data.error || "Unable to add unit.");
@@ -168,7 +183,13 @@ export function RevisionBoard({ initialBoard }: RevisionBoardProps) {
 
         for (const subject of subjectMeta) {
           next[subject.key] = next[subject.key].map((chapter) =>
-            chapter.id === chapterId ? { ...chapter, units: [...chapter.units, data.unit!] } : chapter
+            chapter.id === chapterId
+              ? {
+                  ...chapter,
+                  status: data.chapterStatus ?? chapter.status,
+                  units: [...chapter.units, data.unit!]
+                }
+              : chapter
           );
         }
 
@@ -202,7 +223,7 @@ export function RevisionBoard({ initialBoard }: RevisionBoardProps) {
         body: JSON.stringify({ id: unitId, ...payload })
       });
 
-      const data = (await response.json()) as { error?: string };
+      const data = (await response.json()) as RevisionUnitUpdateResponse;
 
       if (!response.ok) {
         throw new Error(data.error || "Unable to update unit.");
@@ -214,6 +235,7 @@ export function RevisionBoard({ initialBoard }: RevisionBoardProps) {
         for (const subject of subjectMeta) {
           next[subject.key] = next[subject.key].map((chapter) => ({
             ...chapter,
+            status: chapter.id === data.chapterId && data.chapterStatus ? data.chapterStatus : chapter.status,
             units: chapter.units.map((unit) => (unit.id === unitId ? { ...unit, ...payload } : unit))
           }));
         }
@@ -248,7 +270,7 @@ export function RevisionBoard({ initialBoard }: RevisionBoardProps) {
               <div>
                 <h3>{subject.label}</h3>
                 <p className="subject-progress-text">
-                  {subjectProgress[subject.key].done}/{subjectProgress[subject.key].total} complete
+                  {subjectProgress[subject.key].chapterDone}/{subjectProgress[subject.key].chapterTotal} complete
                 </p>
               </div>
               <div className="subject-summary">

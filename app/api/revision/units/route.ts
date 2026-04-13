@@ -16,8 +16,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Missing chapter id." }, { status: 400 });
     }
 
-    const unit = await createRevisionUnit(body.chapterId, body.title || "");
-    return NextResponse.json({ unit });
+    const result = await createRevisionUnit(body.chapterId, body.title || "");
+    return NextResponse.json(result);
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to create unit." },
@@ -42,12 +42,12 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: "Invalid status." }, { status: 400 });
     }
 
-    await updateRevisionUnit(body.id, {
+    const result = await updateRevisionUnit(body.id, {
       title: body.title,
       status: body.status as (typeof STATUS_OPTIONS)[number] | undefined
     });
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json(result);
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to update unit." },

@@ -95,6 +95,22 @@ function buildBoard(chapters: Array<Omit<RevisionChapter, "units">>, units: Revi
   return grouped;
 }
 
+function deriveChapterStatusFromUnits(units: RevisionUnit[]): RevisionStatus {
+  if (!units.length) {
+    return "not-started";
+  }
+
+  if (units.every((unit) => unit.status === "done")) {
+    return "done";
+  }
+
+  if (units.every((unit) => unit.status === "not-started")) {
+    return "not-started";
+  }
+
+  return "in-progress";
+}
+
 function normalizeLabel(label?: string) {
   const value = (label || "").trim();
   return value.slice(0, 10);
@@ -580,13 +596,44 @@ export async function createRevisionUnit(chapterId: string, title: string) {
       throw new Error(error.message);
     }
 
-    return {
+    const unit = {
       id: data.id,
       chapterId: data.chapter_id,
       title: data.title,
       status: data.status as RevisionStatus,
       sortOrder: data.sort_order
     } satisfies RevisionUnit;
+
+    const { data: units, error: unitsError } = await supabase
+      .from("revision_units")
+      .select("id, chapter_id, title, status, sort_order")
+      .eq("chapter_id", chapterId)
+      .order("sort_order", { ascending: true });
+
+    if (unitsError) {
+      throw new Error(unitsError.message);
+    }
+
+    const chapterStatus = deriveChapterStatusFromUnits(
+      (units || []).map((item) => ({
+        id: item.id,
+        chapterId: item.chapter_id,
+        title: item.title,
+        status: item.status as RevisionStatus,
+        sortOrder: item.sort_order
+      }))
+    );
+
+    const { error: chapterError } = await supabase
+      .from("revision_chapters")
+      .update({ status: chapterStatus })
+      .eq("id", chapterId);
+
+    if (chapterError) {
+      throw new Error(chapterError.message);
+    }
+
+    return { unit, chapterId, chapterStatus };
   }
 
   const store = await readLocalStore();
@@ -598,8 +645,15 @@ export async function createRevisionUnit(chapterId: string, title: string) {
     sortOrder: store.revisionUnits.filter((item) => item.chapterId === chapterId).length
   };
   store.revisionUnits.push(unit);
+  const chapter = store.revisionChapters.find((item) => item.id === chapterId);
+
+  if (!chapter) {
+    throw new Error("Chapter not found.");
+  }
+
+  chapter.status = deriveChapterStatusFromUnits(store.revisionUnits.filter((item) => item.chapterId === chapterId));
   await writeLocalStore(store);
-  return unit;
+  return { unit, chapterId, chapterStatus: chapter.status };
 }
 
 export async function updateRevisionUnit(id: string, payload: Partial<Pick<RevisionUnit, "title" | "status" | "sortOrder">>) {
@@ -609,6 +663,16 @@ export async function updateRevisionUnit(id: string, payload: Partial<Pick<Revis
 
   if (isSupabaseConfigured()) {
     const supabase = getSupabaseAdmin()!;
+    const { data: existingUnit, error: existingUnitError } = await supabase
+      .from("revision_units")
+      .select("chapter_id")
+      .eq("id", id)
+      .single();
+
+    if (existingUnitError || !existingUnit) {
+      throw new Error(existingUnitError?.message || "Unit not found.");
+    }
+
     const updateData: Record<string, string | number> = {};
 
     if (payload.title !== undefined) {
@@ -629,7 +693,36 @@ export async function updateRevisionUnit(id: string, payload: Partial<Pick<Revis
       throw new Error(error.message);
     }
 
-    return;
+    const { data: units, error: unitsError } = await supabase
+      .from("revision_units")
+      .select("id, chapter_id, title, status, sort_order")
+      .eq("chapter_id", existingUnit.chapter_id)
+      .order("sort_order", { ascending: true });
+
+    if (unitsError) {
+      throw new Error(unitsError.message);
+    }
+
+    const chapterStatus = deriveChapterStatusFromUnits(
+      (units || []).map((item) => ({
+        id: item.id,
+        chapterId: item.chapter_id,
+        title: item.title,
+        status: item.status as RevisionStatus,
+        sortOrder: item.sort_order
+      }))
+    );
+
+    const { error: chapterError } = await supabase
+      .from("revision_chapters")
+      .update({ status: chapterStatus })
+      .eq("id", existingUnit.chapter_id);
+
+    if (chapterError) {
+      throw new Error(chapterError.message);
+    }
+
+    return { chapterId: existingUnit.chapter_id, chapterStatus };
   }
 
   const store = await readLocalStore();
@@ -651,5 +744,13 @@ export async function updateRevisionUnit(id: string, payload: Partial<Pick<Revis
     unit.sortOrder = payload.sortOrder;
   }
 
+  const chapter = store.revisionChapters.find((item) => item.id === unit.chapterId);
+
+  if (!chapter) {
+    throw new Error("Chapter not found.");
+  }
+
+  chapter.status = deriveChapterStatusFromUnits(store.revisionUnits.filter((item) => item.chapterId === unit.chapterId));
   await writeLocalStore(store);
+  return { chapterId: unit.chapterId, chapterStatus: chapter.status };
 }
