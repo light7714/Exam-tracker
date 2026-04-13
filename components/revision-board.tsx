@@ -53,6 +53,10 @@ export function RevisionBoard({ initialBoard }: RevisionBoardProps) {
   const [unitDrafts, setUnitDrafts] = useState<Record<string, string>>({});
   const [expandedUnitForms, setExpandedUnitForms] = useState<Record<string, boolean>>({});
   const [error, setError] = useState("");
+  const [creatingChapterSubject, setCreatingChapterSubject] = useState<Subject | null>(null);
+  const [creatingUnitChapterId, setCreatingUnitChapterId] = useState<string | null>(null);
+  const [updatingChapterStatusId, setUpdatingChapterStatusId] = useState<string | null>(null);
+  const [updatingUnitStatusId, setUpdatingUnitStatusId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<
     | { entityType: "chapter" | "unit"; id: string; title: string; subject: Subject }
     | null
@@ -101,6 +105,7 @@ export function RevisionBoard({ initialBoard }: RevisionBoardProps) {
     }
 
     setError("");
+    setCreatingChapterSubject(subject);
 
     try {
       const response = await fetch("/api/revision/chapters", {
@@ -124,6 +129,8 @@ export function RevisionBoard({ initialBoard }: RevisionBoardProps) {
       setChapterDrafts((current) => ({ ...current, [subject]: "" }));
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : "Unable to add chapter.");
+    } finally {
+      setCreatingChapterSubject((current) => (current === subject ? null : current));
     }
   }
 
@@ -134,6 +141,11 @@ export function RevisionBoard({ initialBoard }: RevisionBoardProps) {
     }
 
     setError("");
+    const isStatusUpdate = payload.status !== undefined;
+
+    if (isStatusUpdate) {
+      setUpdatingChapterStatusId(chapterId);
+    }
 
     try {
       const response = await fetch("/api/revision/chapters", {
@@ -163,6 +175,10 @@ export function RevisionBoard({ initialBoard }: RevisionBoardProps) {
       });
     } catch (updateError) {
       setError(updateError instanceof Error ? updateError.message : "Unable to update chapter.");
+    } finally {
+      if (isStatusUpdate) {
+        setUpdatingChapterStatusId((current) => (current === chapterId ? null : current));
+      }
     }
   }
 
@@ -175,6 +191,7 @@ export function RevisionBoard({ initialBoard }: RevisionBoardProps) {
     }
 
     setError("");
+    setCreatingUnitChapterId(chapterId);
 
     try {
       const response = await fetch("/api/revision/units", {
@@ -212,6 +229,8 @@ export function RevisionBoard({ initialBoard }: RevisionBoardProps) {
       setExpandedUnitForms((current) => ({ ...current, [chapterId]: false }));
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : "Unable to add unit.");
+    } finally {
+      setCreatingUnitChapterId((current) => (current === chapterId ? null : current));
     }
   }
 
@@ -226,6 +245,11 @@ export function RevisionBoard({ initialBoard }: RevisionBoardProps) {
     }
 
     setError("");
+    const isStatusUpdate = payload.status !== undefined;
+
+    if (isStatusUpdate) {
+      setUpdatingUnitStatusId(unitId);
+    }
 
     try {
       const response = await fetch("/api/revision/units", {
@@ -257,6 +281,10 @@ export function RevisionBoard({ initialBoard }: RevisionBoardProps) {
       });
     } catch (updateError) {
       setError(updateError instanceof Error ? updateError.message : "Unable to update unit.");
+    } finally {
+      if (isStatusUpdate) {
+        setUpdatingUnitStatusId((current) => (current === unitId ? null : current));
+      }
     }
   }
 
@@ -362,9 +390,17 @@ export function RevisionBoard({ initialBoard }: RevisionBoardProps) {
                 value={chapterDrafts[subject.key]}
                 onChange={(event) => setChapterDrafts((current) => ({ ...current, [subject.key]: event.target.value }))}
                 placeholder="Add chapter"
+                disabled={creatingChapterSubject === subject.key}
               />
-              <button type="submit" className="secondary-button">
-                Add
+              <button type="submit" className="secondary-button" disabled={creatingChapterSubject === subject.key}>
+                {creatingChapterSubject === subject.key ? (
+                  <span className="button-loader">
+                    <span className="spinner" aria-hidden="true" />
+                    Adding...
+                  </span>
+                ) : (
+                  "Add"
+                )}
               </button>
             </form>
 
@@ -403,6 +439,7 @@ export function RevisionBoard({ initialBoard }: RevisionBoardProps) {
                           value={chapter.status}
                           onChange={(event) => updateChapter(chapter.id, { status: event.target.value as RevisionStatus })}
                           className={statusClassName(chapter.status)}
+                          disabled={updatingChapterStatusId === chapter.id}
                         >
                           {STATUS_OPTIONS.map((status) => (
                             <option key={status} value={status}>
@@ -410,6 +447,7 @@ export function RevisionBoard({ initialBoard }: RevisionBoardProps) {
                             </option>
                           ))}
                         </select>
+                        {updatingChapterStatusId === chapter.id ? <span className="status-spinner" aria-label="Updating status" /> : null}
                         <button
                           type="button"
                           className="delete-icon-button"
@@ -450,9 +488,17 @@ export function RevisionBoard({ initialBoard }: RevisionBoardProps) {
                             value={unitDrafts[chapter.id] || ""}
                             onChange={(event) => setUnitDrafts((current) => ({ ...current, [chapter.id]: event.target.value }))}
                             placeholder="Add unit (optional)"
+                            disabled={creatingUnitChapterId === chapter.id}
                           />
-                          <button type="submit" className="ghost-button">
-                            Save unit
+                          <button type="submit" className="ghost-button" disabled={creatingUnitChapterId === chapter.id}>
+                            {creatingUnitChapterId === chapter.id ? (
+                              <span className="button-loader">
+                                <span className="spinner spinner--accent" aria-hidden="true" />
+                                Saving...
+                              </span>
+                            ) : (
+                              "Save unit"
+                            )}
                           </button>
                         </form>
                       ) : null}
@@ -500,6 +546,7 @@ export function RevisionBoard({ initialBoard }: RevisionBoardProps) {
                                   value={unit.status}
                                   onChange={(event) => updateUnit(unit.id, { status: event.target.value as RevisionStatus })}
                                   className={statusClassName(unit.status)}
+                                  disabled={updatingUnitStatusId === unit.id}
                                 >
                                   {STATUS_OPTIONS.map((status) => (
                                     <option key={status} value={status}>
@@ -507,6 +554,7 @@ export function RevisionBoard({ initialBoard }: RevisionBoardProps) {
                                     </option>
                                   ))}
                                 </select>
+                                {updatingUnitStatusId === unit.id ? <span className="status-spinner status-spinner--unit" aria-label="Updating status" /> : null}
                                 <button
                                   type="button"
                                   className="delete-icon-button delete-icon-button--unit"

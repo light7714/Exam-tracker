@@ -264,9 +264,9 @@ export function RevisionDetailEditor({ detail }: RevisionDetailEditorProps) {
   return (
     <>
       <section className="revision-detail-shell">
-        <a href={backHref} className="back-link secondary-button revision-detail-back">
+        <Link href={{ pathname: "/revision", hash: `subject-${detail.subject}` }} className="back-link secondary-button revision-detail-back">
           Back to revision board
-        </a>
+        </Link>
 
         <div className="revision-detail-header">
           <div className="revision-detail-copy">

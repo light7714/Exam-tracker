@@ -1,7 +1,7 @@
 "use client";
 
 import type { Route } from "next";
-import { useMemo, useState } from "react";
+import { startTransition, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { ScoreModal } from "@/components/score-modal";
@@ -33,6 +33,7 @@ export function CalendarClient({ initialMonth, initialSummaries, todayString }: 
   const [modalDate, setModalDate] = useState<string | null>(null);
   const [editingTest, setEditingTest] = useState<MockTest | null>(null);
   const [isLoadingMonth, setIsLoadingMonth] = useState(false);
+  const [pendingDate, setPendingDate] = useState<string | null>(null);
   const maxVisibleTests = 2;
 
   const weeks = useMemo(() => createMonthGrid(month), [month]);
@@ -51,6 +52,17 @@ export function CalendarClient({ initialMonth, initialSummaries, todayString }: 
     } finally {
       setIsLoadingMonth(false);
     }
+  }
+
+  function prefetchDate(target: Route) {
+    void router.prefetch(target);
+  }
+
+  function openDate(target: Route, dateString: string) {
+    setPendingDate(dateString);
+    startTransition(() => {
+      router.push(target);
+    });
   }
 
   function handleSavedTest(test: MockTest) {
@@ -104,14 +116,31 @@ export function CalendarClient({ initialMonth, initialSummaries, todayString }: 
           </div>
 
           <div className="calendar-controls">
-            <button type="button" className="secondary-button" onClick={() => loadMonth(monthKeyFromDate(new Date()))}>
-              Today
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => loadMonth(monthKeyFromDate(new Date()))}
+              disabled={isLoadingMonth}
+            >
+              {isLoadingMonth ? "Loading..." : "Today"}
             </button>
             <div className="calendar-stepper">
-              <button type="button" className="icon-button" aria-label="Previous month" onClick={() => loadMonth(shiftMonth(month, -1))}>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Previous month"
+                onClick={() => loadMonth(shiftMonth(month, -1))}
+                disabled={isLoadingMonth}
+              >
                 ‹
               </button>
-              <button type="button" className="icon-button" aria-label="Next month" onClick={() => loadMonth(shiftMonth(month, 1))}>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Next month"
+                onClick={() => loadMonth(shiftMonth(month, 1))}
+                disabled={isLoadingMonth}
+              >
                 ›
               </button>
             </div>
@@ -142,14 +171,26 @@ export function CalendarClient({ initialMonth, initialSummaries, todayString }: 
               return (
                 <article
                   key={dateString}
-                  className={dateString === todayString ? "calendar-cell calendar-cell--today" : "calendar-cell"}
+                  className={
+                    [
+                      "calendar-cell",
+                      dateString === todayString ? "calendar-cell--today" : "",
+                      pendingDate === dateString ? "calendar-cell--navigating" : ""
+                    ]
+                      .filter(Boolean)
+                      .join(" ")
+                  }
                   data-muted={!isCurrentMonth || undefined}
+                  aria-busy={pendingDate === dateString || undefined}
                   tabIndex={0}
-                  onClick={() => router.push(target)}
+                  onMouseEnter={() => prefetchDate(target)}
+                  onFocus={() => prefetchDate(target)}
+                  onTouchStart={() => prefetchDate(target)}
+                  onClick={() => openDate(target, dateString)}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" || event.key === " ") {
                       event.preventDefault();
-                      router.push(target);
+                      openDate(target, dateString);
                     }
                   }}
                 >
@@ -191,8 +232,8 @@ export function CalendarClient({ initialMonth, initialSummaries, todayString }: 
                     ))}
                   </div>
 
-                  <p className={hiddenCount > 0 ? "calendar-cell__more calendar-cell__more--visible" : "calendar-cell__more"}>
-                    {hiddenCount > 0 ? `+${hiddenCount} more` : ""}
+                  <p className={hiddenCount > 0 || pendingDate === dateString ? "calendar-cell__more calendar-cell__more--visible" : "calendar-cell__more"}>
+                    {pendingDate === dateString ? "Opening..." : hiddenCount > 0 ? `+${hiddenCount} more` : ""}
                   </p>
                 </article>
               );
