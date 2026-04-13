@@ -3,6 +3,8 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 
 import {
+  CHEMISTRY_SECTION_OPTIONS,
+  ChemistrySection,
   DayEntry,
   DaySummary,
   FontScale,
@@ -166,6 +168,7 @@ function buildBoard(chapters: Array<Omit<RevisionChapter, "units">>, units: Revi
       .sort((left, right) => left.sortOrder - right.sortOrder || left.title.localeCompare(right.title))
       .map((chapter) => ({
         ...chapter,
+        chemistrySection: normalizeChemistrySection(chapter.subject, chapter.chemistrySection),
         units: (unitsByChapter[chapter.id] || []).sort(
           (left, right) => left.sortOrder - right.sortOrder || left.title.localeCompare(right.title)
         )
@@ -173,6 +176,18 @@ function buildBoard(chapters: Array<Omit<RevisionChapter, "units">>, units: Revi
   }
 
   return grouped;
+}
+
+function normalizeChemistrySection(subject: Subject, chemistrySection?: string | null): ChemistrySection | undefined {
+  if (subject !== "chemistry") {
+    return undefined;
+  }
+
+  if (CHEMISTRY_SECTION_OPTIONS.includes((chemistrySection || "") as ChemistrySection)) {
+    return chemistrySection as ChemistrySection;
+  }
+
+  return CHEMISTRY_SECTION_OPTIONS[0];
 }
 
 function deriveChapterStatusFromUnits(units: RevisionUnit[]): RevisionStatus {
@@ -547,7 +562,10 @@ export async function getRevisionBoard(): Promise<RevisionBoard> {
   if (isSupabaseConfigured()) {
     const supabase = getSupabaseAdmin()!;
     const [{ data: chapters, error: chaptersError }, { data: units, error: unitsError }] = await Promise.all([
-      supabase.from("revision_chapters").select("id, subject, title, status, sort_order").order("sort_order", { ascending: true }),
+      supabase
+        .from("revision_chapters")
+        .select("id, subject, chemistry_section, title, status, sort_order")
+        .order("sort_order", { ascending: true }),
       supabase.from("revision_units").select("id, chapter_id, title, status, sort_order").order("sort_order", { ascending: true })
     ]);
 
@@ -563,6 +581,7 @@ export async function getRevisionBoard(): Promise<RevisionBoard> {
       (chapters || []).map((chapter) => ({
         id: chapter.id,
         subject: chapter.subject as Subject,
+        chemistrySection: normalizeChemistrySection(chapter.subject as Subject, chapter.chemistry_section),
         title: chapter.title,
         status: chapter.status as RevisionStatus,
         sortOrder: chapter.sort_order
@@ -845,8 +864,9 @@ export async function saveRevisionDetail(
   return { updatedAt };
 }
 
-export async function createRevisionChapter(subject: Subject, title: string) {
+export async function createRevisionChapter(subject: Subject, title: string, chemistrySection?: ChemistrySection) {
   const cleanedTitle = title.trim();
+  const normalizedChemistrySection = normalizeChemistrySection(subject, chemistrySection);
 
   if (!cleanedTitle) {
     throw new Error("Chapter title is required.");
@@ -858,8 +878,14 @@ export async function createRevisionChapter(subject: Subject, title: string) {
     const sortOrder = board[subject].length;
     const { data, error } = await supabase
       .from("revision_chapters")
-      .insert({ subject, title: cleanedTitle, status: "not-started", sort_order: sortOrder })
-      .select("id, subject, title, status, sort_order")
+      .insert({
+        subject,
+        chemistry_section: normalizedChemistrySection || null,
+        title: cleanedTitle,
+        status: "not-started",
+        sort_order: sortOrder
+      })
+      .select("id, subject, chemistry_section, title, status, sort_order")
       .single();
 
     if (error) {
@@ -869,6 +895,7 @@ export async function createRevisionChapter(subject: Subject, title: string) {
     return {
       id: data.id,
       subject: data.subject as Subject,
+      chemistrySection: normalizeChemistrySection(data.subject as Subject, data.chemistry_section),
       title: data.title,
       status: data.status as RevisionStatus,
       sortOrder: data.sort_order,
@@ -880,6 +907,7 @@ export async function createRevisionChapter(subject: Subject, title: string) {
   const chapter = {
     id: randomUUID(),
     subject,
+    chemistrySection: normalizedChemistrySection,
     title: cleanedTitle,
     status: "not-started" as RevisionStatus,
     sortOrder: store.revisionChapters.filter((item) => item.subject === subject).length
@@ -892,7 +920,7 @@ export async function createRevisionChapter(subject: Subject, title: string) {
 
 export async function updateRevisionChapter(
   id: string,
-  payload: Partial<Pick<RevisionChapter, "title" | "status" | "sortOrder">>
+  payload: Partial<Pick<RevisionChapter, "title" | "status" | "sortOrder" | "chemistrySection">>
 ) {
   if (payload.title !== undefined && !payload.title.trim()) {
     throw new Error("Chapter title is required.");
@@ -912,6 +940,10 @@ export async function updateRevisionChapter(
 
     if (payload.sortOrder !== undefined) {
       updateData.sort_order = payload.sortOrder;
+    }
+
+    if (payload.chemistrySection !== undefined) {
+      updateData.chemistry_section = payload.chemistrySection;
     }
 
     const { error } = await supabase.from("revision_chapters").update(updateData).eq("id", id);
@@ -940,6 +972,10 @@ export async function updateRevisionChapter(
 
   if (payload.sortOrder !== undefined) {
     chapter.sortOrder = payload.sortOrder;
+  }
+
+  if (payload.chemistrySection !== undefined) {
+    chapter.chemistrySection = normalizeChemistrySection(chapter.subject, payload.chemistrySection);
   }
 
   await writeLocalStore(store);

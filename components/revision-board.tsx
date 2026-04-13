@@ -4,7 +4,15 @@ import Link from "next/link";
 import { FormEvent, useMemo, useState } from "react";
 
 import { ConfirmDeleteModal } from "@/components/confirm-delete-modal";
-import { RevisionBoard as RevisionBoardType, RevisionChapter, RevisionStatus, RevisionUnit, STATUS_OPTIONS, Subject } from "@/lib/types";
+import {
+  ChemistrySection,
+  RevisionBoard as RevisionBoardType,
+  RevisionChapter,
+  RevisionStatus,
+  RevisionUnit,
+  STATUS_OPTIONS,
+  Subject
+} from "@/lib/types";
 
 type RevisionBoardProps = {
   initialBoard: RevisionBoardType;
@@ -42,18 +50,30 @@ const statusLabels: Record<RevisionStatus, string> = {
   done: "Done"
 };
 
+const chemistrySectionMeta: Array<{ key: ChemistrySection; label: string }> = [
+  { key: "organic-chemistry", label: "Organic Chemistry" },
+  { key: "inorganic-chemistry", label: "Inorganic Chemistry" },
+  { key: "physical-chemistry", label: "Physical Chemistry" }
+];
+
+function getChapterDraftKey(subject: Subject, chemistrySection?: ChemistrySection) {
+  return subject === "chemistry" && chemistrySection ? `chemistry:${chemistrySection}` : subject;
+}
+
 export function RevisionBoard({ initialBoard }: RevisionBoardProps) {
   const [board, setBoard] = useState(initialBoard);
-  const [chapterDrafts, setChapterDrafts] = useState<Record<Subject, string>>({
+  const [chapterDrafts, setChapterDrafts] = useState<Record<string, string>>({
     physics: "",
-    chemistry: "",
     zoology: "",
-    botany: ""
+    botany: "",
+    "chemistry:organic-chemistry": "",
+    "chemistry:inorganic-chemistry": "",
+    "chemistry:physical-chemistry": ""
   });
   const [unitDrafts, setUnitDrafts] = useState<Record<string, string>>({});
   const [expandedUnitForms, setExpandedUnitForms] = useState<Record<string, boolean>>({});
   const [error, setError] = useState("");
-  const [creatingChapterSubject, setCreatingChapterSubject] = useState<Subject | null>(null);
+  const [creatingChapterKey, setCreatingChapterKey] = useState<string | null>(null);
   const [creatingUnitChapterId, setCreatingUnitChapterId] = useState<string | null>(null);
   const [updatingChapterStatusId, setUpdatingChapterStatusId] = useState<string | null>(null);
   const [updatingUnitStatusId, setUpdatingUnitStatusId] = useState<string | null>(null);
@@ -62,6 +82,15 @@ export function RevisionBoard({ initialBoard }: RevisionBoardProps) {
     | null
   >(null);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  function resizeTextarea(element: HTMLTextAreaElement | null) {
+    if (!element) {
+      return;
+    }
+
+    element.style.height = "0px";
+    element.style.height = `${element.scrollHeight}px`;
+  }
 
   const progress = useMemo(() => {
     const chapters = Object.values(board).flat();
@@ -96,16 +125,17 @@ export function RevisionBoard({ initialBoard }: RevisionBoardProps) {
     ) as Record<Subject, { chapterTotal: number; chapterDone: number; percentage: number }>;
   }, [board]);
 
-  async function createChapter(event: FormEvent<HTMLFormElement>, subject: Subject) {
+  async function createChapter(event: FormEvent<HTMLFormElement>, subject: Subject, chemistrySection?: ChemistrySection) {
     event.preventDefault();
-    const title = chapterDrafts[subject].trim();
+    const draftKey = getChapterDraftKey(subject, chemistrySection);
+    const title = (chapterDrafts[draftKey] || "").trim();
 
     if (!title) {
       return;
     }
 
     setError("");
-    setCreatingChapterSubject(subject);
+    setCreatingChapterKey(draftKey);
 
     try {
       const response = await fetch("/api/revision/chapters", {
@@ -113,7 +143,7 @@ export function RevisionBoard({ initialBoard }: RevisionBoardProps) {
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({ subject, title })
+        body: JSON.stringify({ subject, title, chemistrySection })
       });
 
       const data = (await response.json()) as { chapter?: RevisionChapter; error?: string };
@@ -126,11 +156,11 @@ export function RevisionBoard({ initialBoard }: RevisionBoardProps) {
         ...current,
         [subject]: [...current[subject], data.chapter!]
       }));
-      setChapterDrafts((current) => ({ ...current, [subject]: "" }));
+      setChapterDrafts((current) => ({ ...current, [draftKey]: "" }));
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : "Unable to add chapter.");
     } finally {
-      setCreatingChapterSubject((current) => (current === subject ? null : current));
+      setCreatingChapterKey((current) => (current === draftKey ? null : current));
     }
   }
 
@@ -340,6 +370,231 @@ export function RevisionBoard({ initialBoard }: RevisionBoardProps) {
     }
   }
 
+  function getChemistrySectionForChapter(chapter: RevisionChapter) {
+    return chapter.chemistrySection || chemistrySectionMeta[0].key;
+  }
+
+  function renderChapterForm(subject: Subject, chemistrySection?: ChemistrySection) {
+    const draftKey = getChapterDraftKey(subject, chemistrySection);
+    const isLoading = creatingChapterKey === draftKey;
+
+    return (
+      <form className="inline-form" onSubmit={(event) => createChapter(event, subject, chemistrySection)}>
+        <input
+          type="text"
+          value={chapterDrafts[draftKey] || ""}
+          onChange={(event) => setChapterDrafts((current) => ({ ...current, [draftKey]: event.target.value }))}
+          placeholder="Add chapter"
+          disabled={isLoading}
+        />
+        <button type="submit" className="secondary-button" disabled={isLoading}>
+          {isLoading ? (
+            <span className="button-loader">
+              <span className="spinner" aria-hidden="true" />
+              Adding...
+            </span>
+          ) : (
+            "Add"
+          )}
+        </button>
+      </form>
+    );
+  }
+
+  function renderChapterCard(subject: Subject, chapter: RevisionChapter) {
+    return (
+      <article key={chapter.id} className="chapter-card">
+        <div className="chapter-card__row">
+          <div className="entity-main-row">
+            <textarea
+              rows={1}
+              value={chapter.title}
+              ref={resizeTextarea}
+              onInput={(event) => resizeTextarea(event.currentTarget)}
+              onChange={(event) => {
+                const title = event.target.value.replace(/\s*\n+\s*/g, " ");
+                setBoard((current) => ({
+                  ...current,
+                  [subject]: current[subject].map((item) => (item.id === chapter.id ? { ...item, title } : item))
+                }));
+              }}
+              onBlur={(event) => updateChapter(chapter.id, { title: event.target.value })}
+              className="editable-input"
+            />
+            <Link
+              href={`/revision/${subject}/chapter/${chapter.id}` as never}
+              className="link-icon-button"
+              aria-label={`Open notes for ${chapter.title || "this chapter"}`}
+              title="Open notes"
+            >
+              ↗
+            </Link>
+          </div>
+          <div className="status-action-row">
+            <select
+              value={chapter.status}
+              onChange={(event) => updateChapter(chapter.id, { status: event.target.value as RevisionStatus })}
+              className={statusClassName(chapter.status)}
+              disabled={updatingChapterStatusId === chapter.id}
+            >
+              {STATUS_OPTIONS.map((status) => (
+                <option key={status} value={status}>
+                  {statusLabels[status]}
+                </option>
+              ))}
+            </select>
+            {updatingChapterStatusId === chapter.id ? <span className="status-spinner" aria-label="Updating status" /> : null}
+            <button
+              type="button"
+              className="delete-icon-button"
+              aria-label={`Delete ${chapter.title || "this chapter"}`}
+              title="Delete"
+              onClick={() =>
+                setDeleteTarget({
+                  entityType: "chapter",
+                  id: chapter.id,
+                  title: chapter.title || "this chapter",
+                  subject
+                })
+              }
+            >
+              ×
+            </button>
+          </div>
+        </div>
+
+        <div className="unit-controls">
+          <button
+            type="button"
+            className="unit-toggle"
+            onClick={() =>
+              setExpandedUnitForms((current) => ({
+                ...current,
+                [chapter.id]: !current[chapter.id]
+              }))
+            }
+          >
+            {expandedUnitForms[chapter.id] ? "Hide unit form" : "Add unit"}
+          </button>
+
+          {expandedUnitForms[chapter.id] ? (
+            <form className="inline-form inline-form--unit" onSubmit={(event) => createUnit(event, chapter.id)}>
+              <input
+                type="text"
+                value={unitDrafts[chapter.id] || ""}
+                onChange={(event) => setUnitDrafts((current) => ({ ...current, [chapter.id]: event.target.value }))}
+                placeholder="Add unit (optional)"
+                disabled={creatingUnitChapterId === chapter.id}
+              />
+              <button type="submit" className="ghost-button" disabled={creatingUnitChapterId === chapter.id}>
+                {creatingUnitChapterId === chapter.id ? (
+                  <span className="button-loader">
+                    <span className="spinner spinner--accent" aria-hidden="true" />
+                    Saving...
+                  </span>
+                ) : (
+                  "Save unit"
+                )}
+              </button>
+            </form>
+          ) : null}
+        </div>
+
+        {chapter.units.length ? (
+          <div className="unit-list">
+            {chapter.units.map((unit) => (
+              <div key={unit.id} className="unit-item">
+                <div className="unit-row">
+                  <div className="entity-main-row entity-main-row--unit">
+                    <textarea
+                      rows={1}
+                      value={unit.title}
+                      ref={resizeTextarea}
+                      onInput={(event) => resizeTextarea(event.currentTarget)}
+                      onChange={(event) => {
+                        const title = event.target.value.replace(/\s*\n+\s*/g, " ");
+                        setBoard((current) => ({
+                          ...current,
+                          [subject]: current[subject].map((item) =>
+                            item.id === chapter.id
+                              ? {
+                                  ...item,
+                                  units: item.units.map((currentUnit) =>
+                                    currentUnit.id === unit.id ? { ...currentUnit, title } : currentUnit
+                                  )
+                                }
+                              : item
+                          )
+                        }));
+                      }}
+                      onBlur={(event) => updateUnit(unit.id, { title: event.target.value })}
+                      className="editable-input editable-input--unit"
+                    />
+                    <Link
+                      href={`/revision/${subject}/unit/${unit.id}` as never}
+                      className="link-icon-button link-icon-button--unit"
+                      aria-label={`Open notes for ${unit.title || "this unit"}`}
+                      title="Open notes"
+                    >
+                      ↗
+                    </Link>
+                  </div>
+                  <div className="status-action-row status-action-row--unit">
+                    <select
+                      value={unit.status}
+                      onChange={(event) => updateUnit(unit.id, { status: event.target.value as RevisionStatus })}
+                      className={statusClassName(unit.status)}
+                      disabled={updatingUnitStatusId === unit.id}
+                    >
+                      {STATUS_OPTIONS.map((status) => (
+                        <option key={status} value={status}>
+                          {statusLabels[status]}
+                        </option>
+                      ))}
+                    </select>
+                    {updatingUnitStatusId === unit.id ? (
+                      <span className="status-spinner status-spinner--unit" aria-label="Updating status" />
+                    ) : null}
+                    <button
+                      type="button"
+                      className="delete-icon-button delete-icon-button--unit"
+                      aria-label={`Delete ${unit.title || "this unit"}`}
+                      title="Delete"
+                      onClick={() =>
+                        setDeleteTarget({
+                          entityType: "unit",
+                          id: unit.id,
+                          title: unit.title || "this unit",
+                          subject
+                        })
+                      }
+                    >
+                      ×
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </article>
+    );
+  }
+
+  function renderChapterList(subject: Subject, chapters: RevisionChapter[], emptyMessage = "No chapters added yet.") {
+    return (
+      <div className="chapter-list">
+        {chapters.length ? (
+          chapters.map((chapter) => renderChapterCard(subject, chapter))
+        ) : (
+          <div className="empty-card">
+            <p>{emptyMessage}</p>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <>
       <section className="revision-shell">
@@ -384,207 +639,31 @@ export function RevisionBoard({ initialBoard }: RevisionBoardProps) {
               <span style={{ width: `${subjectProgress[subject.key].percentage}%` }} />
             </div>
 
-            <form className="inline-form" onSubmit={(event) => createChapter(event, subject.key)}>
-              <input
-                type="text"
-                value={chapterDrafts[subject.key]}
-                onChange={(event) => setChapterDrafts((current) => ({ ...current, [subject.key]: event.target.value }))}
-                placeholder="Add chapter"
-                disabled={creatingChapterSubject === subject.key}
-              />
-              <button type="submit" className="secondary-button" disabled={creatingChapterSubject === subject.key}>
-                {creatingChapterSubject === subject.key ? (
-                  <span className="button-loader">
-                    <span className="spinner" aria-hidden="true" />
-                    Adding...
-                  </span>
-                ) : (
-                  "Add"
-                )}
-              </button>
-            </form>
+            {subject.key === "chemistry" ? (
+              <div className="subject-sections">
+                {chemistrySectionMeta.map((section) => {
+                  const chapters = board.chemistry.filter(
+                    (chapter) => getChemistrySectionForChapter(chapter) === section.key
+                  );
 
-            <div className="chapter-list">
-              {board[subject.key].length ? (
-                board[subject.key].map((chapter) => (
-                  <article key={chapter.id} className="chapter-card">
-                    <div className="chapter-card__row">
-                      <div className="entity-main-row">
-                        <input
-                          type="text"
-                          value={chapter.title}
-                          onChange={(event) => {
-                            const title = event.target.value;
-                            setBoard((current) => ({
-                              ...current,
-                              [subject.key]: current[subject.key].map((item) =>
-                                item.id === chapter.id ? { ...item, title } : item
-                              )
-                            }));
-                          }}
-                          onBlur={(event) => updateChapter(chapter.id, { title: event.target.value })}
-                          className="editable-input"
-                        />
-                        <Link
-                          href={`/revision/${subject.key}/chapter/${chapter.id}` as never}
-                          className="link-icon-button"
-                          aria-label={`Open notes for ${chapter.title || "this chapter"}`}
-                          title="Open notes"
-                        >
-                          ↗
-                        </Link>
+                  return (
+                    <section key={section.key} className="subject-section">
+                      <div className="subject-section__header">
+                        <h4>{section.label}</h4>
+                        <span>{chapters.length} chapters</span>
                       </div>
-                      <div className="status-action-row">
-                        <select
-                          value={chapter.status}
-                          onChange={(event) => updateChapter(chapter.id, { status: event.target.value as RevisionStatus })}
-                          className={statusClassName(chapter.status)}
-                          disabled={updatingChapterStatusId === chapter.id}
-                        >
-                          {STATUS_OPTIONS.map((status) => (
-                            <option key={status} value={status}>
-                              {statusLabels[status]}
-                            </option>
-                          ))}
-                        </select>
-                        {updatingChapterStatusId === chapter.id ? <span className="status-spinner" aria-label="Updating status" /> : null}
-                        <button
-                          type="button"
-                          className="delete-icon-button"
-                          aria-label={`Delete ${chapter.title || "this chapter"}`}
-                          title="Delete"
-                          onClick={() =>
-                            setDeleteTarget({
-                              entityType: "chapter",
-                              id: chapter.id,
-                              title: chapter.title || "this chapter",
-                              subject: subject.key
-                            })
-                          }
-                        >
-                          ×
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="unit-controls">
-                      <button
-                        type="button"
-                        className="unit-toggle"
-                        onClick={() =>
-                          setExpandedUnitForms((current) => ({
-                            ...current,
-                            [chapter.id]: !current[chapter.id]
-                          }))
-                        }
-                      >
-                        {expandedUnitForms[chapter.id] ? "Hide unit form" : "Add unit"}
-                      </button>
-
-                      {expandedUnitForms[chapter.id] ? (
-                        <form className="inline-form inline-form--unit" onSubmit={(event) => createUnit(event, chapter.id)}>
-                          <input
-                            type="text"
-                            value={unitDrafts[chapter.id] || ""}
-                            onChange={(event) => setUnitDrafts((current) => ({ ...current, [chapter.id]: event.target.value }))}
-                            placeholder="Add unit (optional)"
-                            disabled={creatingUnitChapterId === chapter.id}
-                          />
-                          <button type="submit" className="ghost-button" disabled={creatingUnitChapterId === chapter.id}>
-                            {creatingUnitChapterId === chapter.id ? (
-                              <span className="button-loader">
-                                <span className="spinner spinner--accent" aria-hidden="true" />
-                                Saving...
-                              </span>
-                            ) : (
-                              "Save unit"
-                            )}
-                          </button>
-                        </form>
-                      ) : null}
-                    </div>
-
-                    {chapter.units.length ? (
-                      <div className="unit-list">
-                        {chapter.units.map((unit) => (
-                          <div key={unit.id} className="unit-item">
-                            <div className="unit-row">
-                              <div className="entity-main-row entity-main-row--unit">
-                                <input
-                                  type="text"
-                                  value={unit.title}
-                                  onChange={(event) => {
-                                    const title = event.target.value;
-                                    setBoard((current) => ({
-                                      ...current,
-                                      [subject.key]: current[subject.key].map((item) =>
-                                        item.id === chapter.id
-                                          ? {
-                                              ...item,
-                                              units: item.units.map((currentUnit) =>
-                                                currentUnit.id === unit.id ? { ...currentUnit, title } : currentUnit
-                                              )
-                                            }
-                                          : item
-                                      )
-                                    }));
-                                  }}
-                                  onBlur={(event) => updateUnit(unit.id, { title: event.target.value })}
-                                  className="editable-input editable-input--unit"
-                                />
-                                <Link
-                                  href={`/revision/${subject.key}/unit/${unit.id}` as never}
-                                  className="link-icon-button link-icon-button--unit"
-                                  aria-label={`Open notes for ${unit.title || "this unit"}`}
-                                  title="Open notes"
-                                >
-                                  ↗
-                                </Link>
-                              </div>
-                              <div className="status-action-row status-action-row--unit">
-                                <select
-                                  value={unit.status}
-                                  onChange={(event) => updateUnit(unit.id, { status: event.target.value as RevisionStatus })}
-                                  className={statusClassName(unit.status)}
-                                  disabled={updatingUnitStatusId === unit.id}
-                                >
-                                  {STATUS_OPTIONS.map((status) => (
-                                    <option key={status} value={status}>
-                                      {statusLabels[status]}
-                                    </option>
-                                  ))}
-                                </select>
-                                {updatingUnitStatusId === unit.id ? <span className="status-spinner status-spinner--unit" aria-label="Updating status" /> : null}
-                                <button
-                                  type="button"
-                                  className="delete-icon-button delete-icon-button--unit"
-                                  aria-label={`Delete ${unit.title || "this unit"}`}
-                                  title="Delete"
-                                  onClick={() =>
-                                    setDeleteTarget({
-                                      entityType: "unit",
-                                      id: unit.id,
-                                      title: unit.title || "this unit",
-                                      subject: subject.key
-                                    })
-                                  }
-                                >
-                                  ×
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : null}
-                  </article>
-                ))
-              ) : (
-                <div className="empty-card">
-                  <p>No chapters added yet.</p>
-                </div>
-              )}
-            </div>
+                      {renderChapterForm("chemistry", section.key)}
+                      {renderChapterList("chemistry", chapters, `No chapters added in ${section.label} yet.`)}
+                    </section>
+                  );
+                })}
+              </div>
+            ) : (
+              <>
+                {renderChapterForm(subject.key)}
+                {renderChapterList(subject.key, board[subject.key])}
+              </>
+            )}
           </section>
         ))}
       </div>

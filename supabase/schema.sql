@@ -30,7 +30,28 @@ create table if not exists revision_chapters (
   created_at timestamptz not null default timezone('utc', now())
 );
 
+alter table revision_chapters
+  add column if not exists chemistry_section text;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'revision_chapters_chemistry_section_check'
+  ) then
+    alter table revision_chapters
+      add constraint revision_chapters_chemistry_section_check
+      check (
+        chemistry_section is null
+        or chemistry_section in ('organic-chemistry', 'inorganic-chemistry', 'physical-chemistry')
+      );
+  end if;
+end
+$$;
+
 create index if not exists revision_chapters_subject_idx on revision_chapters (subject, sort_order, created_at);
+create index if not exists revision_chapters_subject_section_idx on revision_chapters (subject, chemistry_section, sort_order, created_at);
 
 create table if not exists revision_units (
   id uuid primary key default gen_random_uuid(),

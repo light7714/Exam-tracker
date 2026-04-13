@@ -2,12 +2,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { NotesEditor } from "@/components/notes-editor";
-import { requireAccess } from "@/lib/auth";
 import { formatLongDate, isValidDateString } from "@/lib/date-utils";
 import { getDayEntry } from "@/lib/store";
 
 export default async function DayPage({ params }: { params: Promise<{ date: string }> }) {
-  await requireAccess();
   const { date } = await params;
 
   if (!isValidDateString(date)) {

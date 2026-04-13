@@ -42,7 +42,8 @@ a {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -247,7 +248,9 @@ button {
 }
 
 .field input,
+.field textarea,
 .inline-form input,
+.inline-form textarea,
 .editable-input,
 .status-select,
 .field--readonly input {
@@ -262,7 +265,9 @@ button {
 }
 
 .field input:focus,
+.field textarea:focus,
 .inline-form input:focus,
+.inline-form textarea:focus,
 .editable-input:focus,
 .status-select:focus {
   border-color: rgba(217, 141, 98, 0.6);
@@ -717,22 +722,23 @@ button {
 .link-icon-button {
   display: inline-grid;
   place-items: center;
-  width: 44px;
-  min-width: 44px;
-  height: 44px;
-  border-radius: 14px;
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  border-radius: 12px;
   border: 1px solid var(--line);
   background: rgba(217, 141, 98, 0.1);
   color: var(--primary-deep);
-  font-size: 1.05rem;
+  font-size: 1rem;
   line-height: 1;
 }
 
 .link-icon-button--unit {
-  width: 40px;
-  min-width: 40px;
-  height: 40px;
-  font-size: 0.98rem;
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  font-size: 0.92rem;
 }
 
 .score-list {
@@ -942,6 +948,37 @@ button {
   margin-top: 16px;
 }
 
+.subject-sections {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.subject-section {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 16px;
+  background: rgba(255, 253, 248, 0.78);
+}
+
+.subject-section__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.subject-section__header h4 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.subject-section__header span {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
 .chapter-card {
   border: 1px solid var(--line);
   border-radius: 18px;
@@ -974,6 +1011,7 @@ button {
 .entity-main-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
   gap: 10px;
   align-items: center;
 }
@@ -986,6 +1024,8 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  flex: 0 0 auto;
+  min-width: fit-content;
 }
 
 .status-action-row--unit {
@@ -995,6 +1035,13 @@ button {
 .editable-input {
   padding-top: 12px;
   padding-bottom: 12px;
+  min-width: 0;
+  field-sizing: content;
+  resize: none;
+  overflow: hidden;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .editable-input--unit {
@@ -1005,15 +1052,19 @@ button {
 }
 
 .status-select {
-  width: auto;
-  min-width: 148px;
+  width: fit-content;
+  min-width: 11.25ch;
   border-width: 1px;
+  white-space: nowrap;
+  min-height: 34px;
+  padding: 8px 14px;
 }
 
 .unit-row .status-select {
-  min-width: 132px;
+  min-width: 11.25ch;
   font-size: 0.92rem;
-  padding: 10px 14px;
+  min-height: 30px;
+  padding: 6px 12px;
   border-radius: 14px;
 }
 

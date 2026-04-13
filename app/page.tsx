@@ -9,8 +9,10 @@ export default async function HomePage() {
   }
 
   return (
-    <section className="gate-layout">
-      <GateForm />
-    </section>
+    <main className="page-shell page-shell--gate">
+      <section className="gate-layout">
+        <GateForm />
+      </section>
+    </main>
   );
 }

@@ -3,12 +3,18 @@ export const STATUS_OPTIONS = ["not-started", "in-progress", "done"] as const;
 export const FONT_SCALES = ["sm", "md", "lg"] as const;
 export const REVISION_DETAIL_TYPES = ["chapter", "unit"] as const;
 export const REVISION_CHECKLIST_GROUPS = ["weakPoints", "formulas", "mistakes"] as const;
+export const CHEMISTRY_SECTION_OPTIONS = [
+  "organic-chemistry",
+  "inorganic-chemistry",
+  "physical-chemistry"
+] as const;
 
 export type Subject = (typeof SUBJECTS)[number];
 export type RevisionStatus = (typeof STATUS_OPTIONS)[number];
 export type FontScale = (typeof FONT_SCALES)[number];
 export type RevisionDetailType = (typeof REVISION_DETAIL_TYPES)[number];
 export type RevisionChecklistGroup = (typeof REVISION_CHECKLIST_GROUPS)[number];
+export type ChemistrySection = (typeof CHEMISTRY_SECTION_OPTIONS)[number];
 
 export type MockTest = {
   id: string;
@@ -56,6 +62,7 @@ export type RevisionUnit = {
 export type RevisionChapter = {
   id: string;
   subject: Subject;
+  chemistrySection?: ChemistrySection;
   title: string;
   status: RevisionStatus;
   sortOrder: number;

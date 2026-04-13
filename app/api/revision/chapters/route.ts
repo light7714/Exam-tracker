@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { hasAccess } from "@/lib/auth";
 import { createRevisionChapter, deleteRevisionChapter, updateRevisionChapter } from "@/lib/store";
-import { STATUS_OPTIONS, SUBJECTS } from "@/lib/types";
+import { CHEMISTRY_SECTION_OPTIONS, STATUS_OPTIONS, SUBJECTS } from "@/lib/types";
 
 export async function POST(request: Request) {
   if (!(await hasAccess())) {
@@ -10,13 +10,24 @@ export async function POST(request: Request) {
   }
 
   try {
-    const body = (await request.json()) as { subject?: string; title?: string };
+    const body = (await request.json()) as { subject?: string; title?: string; chemistrySection?: string };
 
     if (!SUBJECTS.includes((body.subject || "") as (typeof SUBJECTS)[number])) {
       return NextResponse.json({ error: "Invalid subject." }, { status: 400 });
     }
 
-    const chapter = await createRevisionChapter(body.subject as (typeof SUBJECTS)[number], body.title || "");
+    if (
+      body.subject === "chemistry" &&
+      !CHEMISTRY_SECTION_OPTIONS.includes((body.chemistrySection || "") as (typeof CHEMISTRY_SECTION_OPTIONS)[number])
+    ) {
+      return NextResponse.json({ error: "Choose a chemistry section." }, { status: 400 });
+    }
+
+    const chapter = await createRevisionChapter(
+      body.subject as (typeof SUBJECTS)[number],
+      body.title || "",
+      body.chemistrySection as (typeof CHEMISTRY_SECTION_OPTIONS)[number] | undefined
+    );
     return NextResponse.json({ chapter });
   } catch (error) {
     return NextResponse.json(
@@ -32,7 +43,7 @@ export async function PATCH(request: Request) {
   }
 
   try {
-    const body = (await request.json()) as { id?: string; title?: string; status?: string };
+    const body = (await request.json()) as { id?: string; title?: string; status?: string; chemistrySection?: string };
 
     if (!body.id) {
       return NextResponse.json({ error: "Missing chapter id." }, { status: 400 });
@@ -42,9 +53,17 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: "Invalid status." }, { status: 400 });
     }
 
+    if (
+      body.chemistrySection &&
+      !CHEMISTRY_SECTION_OPTIONS.includes(body.chemistrySection as (typeof CHEMISTRY_SECTION_OPTIONS)[number])
+    ) {
+      return NextResponse.json({ error: "Invalid chemistry section." }, { status: 400 });
+    }
+
     await updateRevisionChapter(body.id, {
       title: body.title,
-      status: body.status as (typeof STATUS_OPTIONS)[number] | undefined
+      status: body.status as (typeof STATUS_OPTIONS)[number] | undefined,
+      chemistrySection: body.chemistrySection as (typeof CHEMISTRY_SECTION_OPTIONS)[number] | undefined
     });
 
     return NextResponse.json({ success: true });
