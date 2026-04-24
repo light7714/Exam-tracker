@@ -39,16 +39,16 @@ export function GateForm() {
 
   return (
     <form className="gate-card" onSubmit={handleSubmit}>
-      <p className="eyebrow">Private Entrance ❤️</p>
+      <p className="eyebrow">Private Entrance</p>
       <h1>NEET mock test scores and revision tracker</h1>
-      <p className="gate-card__copy">Only MY love can pass through this 😤💍</p>
+      <p className="gate-card__copy">What is your specific Binomial Nomenclature?</p>
 
       <label className="field">
         <input
           type="text"
           value={name}
           onChange={(event) => setName(event.target.value)}
-          placeholder="Enter your full name 💖"
+          placeholder="Genus: Human, Species: [Enter Your Name Here]."
           autoComplete="off"
           spellCheck={false}
           required
